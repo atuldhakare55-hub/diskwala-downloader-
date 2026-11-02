@@ -5,7 +5,6 @@ import sqlite3
 import aiohttp
 from aiohttp import web
 
-# Loop setup for Render and Python runtimes
 try:
     loop = asyncio.get_event_loop()
 except RuntimeError:
@@ -105,10 +104,6 @@ async def shorten_url(url, site, api_key):
     except Exception:
         return url
 
-def extract_file_id(url):
-    clean_url = url.strip().split("?")[0].rstrip("/")
-    return clean_url.split("/")[-1]
-
 # ================= Start & Referral =================
 @app.on_message(filters.command("start") & filters.private)
 async def start_handler(client, message):
@@ -203,8 +198,12 @@ async def cb_handler(client, query):
         await query.message.delete()
 
 # ================= Diskwala Link Processing =================
-@app.on_message(filters.regex(r"https?://[^\s]+") & filters.private)
+@app.on_message(filters.text & filters.private & ~filters.command(["start", "admin", "set_s1", "set_s2", "set_ch1", "set_ch2", "add_prem", "broadcast"]))
 async def process_link(client, message):
+    text = message.text.strip()
+    if "diskwala" not in text.lower():
+        return await message.reply_text("⚠️ Kripya valid Diskwala video link bhejein.")
+
     user_id = message.from_user.id
     if not (await is_subscribed(client, user_id)):
         return await message.reply_text("⚠️ Pehle channel join karein.")
@@ -234,12 +233,13 @@ async def process_link(client, message):
         ])
         return await message.reply_text("⚠️ **Link access karne ke liye task verify karein:**\n\nNiche button se verification complete karke 24h pass unlock karein.", reply_markup=btn)
 
-    status = await message.reply_text("⚡ Links generate ho rahe hain...")
-    url = message.text.strip()
-    file_id = extract_file_id(url)
+    status = await message.reply_text("⚡ Generating Stream & Download links...")
+    
+    # Extract ID
+    clean = text.split("?")[0].rstrip("/")
+    file_id = clean.split("/")[-1]
 
-    # Diskwala direct routing URLs
-    stream_url = f"https://diskwala.com/stream/{file_id}"
+    stream_url = f"https://www.diskwala.com/app/{file_id}"
     download_url = f"https://diskwala.com/download/{file_id}"
 
     kb = InlineKeyboardMarkup([
@@ -254,10 +254,9 @@ async def process_link(client, message):
 
     await status.delete()
     await message.reply_text(
-        f"🎬 **Diskwala Video**\n\n"
-        f"🆔 File ID: `{file_id}`\n\n"
-        "✅ **Aapke links ready hain:**\n"
-        "Niche diye buttons se direct online stream karein ya full speed me download karein:",
+        f"🎬 **Diskwala Video Ready**\n\n"
+        f"🆔 **File ID:** `{file_id}`\n\n"
+        "Niche diye buttons se video stream ya download karein:",
         reply_markup=kb
     )
 
@@ -363,7 +362,7 @@ async def bcast(client, message):
 
 # ================= Web Server & Runner =================
 async def handle_ping(request):
-    return web.Response(text="Diskwala Bot is Running!")
+    return web.Response(text="Diskwala Stream Bot is Running!")
 
 async def start_web_server():
     server = web.Application()
