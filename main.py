@@ -1,19 +1,19 @@
 import os
-import re
-import time
 import asyncio
+
+# Python 3.12+ / 3.14 Render event loop fix (Pyrogram import se pehle zaroori hai)
+try:
+    loop = asyncio.get_running_loop()
+except RuntimeError:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+import time
 import sqlite3
 import aiohttp
 from aiohttp import web
 from pyrogram import Client, filters, idle
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-
-# Render event loop setup
-try:
-    loop = asyncio.get_event_loop()
-except RuntimeError:
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
 
 # ================= Credentials =================
 API_ID = 37940634
@@ -38,51 +38,6 @@ conn.commit()
 
 app = Client("diskwala_stream_bot", bot_token=BOT_TOKEN, api_id=API_ID, api_hash=API_HASH)
 
-# ================= Diskwala Bypass Scraper =================
-async def resolve_diskwala(url):
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://www.diskwala.com/"
-    }
-    
-    clean_url = url.strip().split("?")[0].rstrip("/")
-    file_id = clean_url.split("/")[-1]
-
-    target_url = f"https://www.diskwala.com/app/{file_id}"
-    
-    try:
-        async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(target_url, timeout=12) as resp:
-                if resp.status == 200:
-                    html = await resp.text()
-                    
-                    # Page source se video streaming / download link dhoondhna
-                    # 1. m3u8 ya direct mp4 pattern
-                    mp4_matches = re.findall(r'(https?://[^\s"\']+\.(?:mp4|m3u8)[^\s"\']*)', html)
-                    if mp4_matches:
-                        return mp4_matches[0], file_id
-                    
-                    # 2. source src tag pattern
-                    src_matches = re.findall(r'src=["\'](https?://[^\s"\']+)["\']', html)
-                    for src in src_matches:
-                        if "stream" in src or "video" in src or "download" in src:
-                            return src, file_id
-                    
-                    # 3. Direct API call attempt
-                    api_call = f"https://www.diskwala.com/api/v1/file/{file_id}"
-                    async with session.get(api_call, timeout=8) as api_resp:
-                        if api_resp.status == 200:
-                            data = await api_resp.json()
-                            direct = data.get("direct_link") or data.get("url") or data.get("stream_url")
-                            if direct:
-                                return direct, file_id
-    except Exception:
-        pass
-
-    # Agar scrape na ho paye toh fallback direct endpoint
-    fallback_link = f"https://diskwala.com/api/file/download/{file_id}"
-    return fallback_link, file_id
-
 # ================= Start Command =================
 @app.on_message(filters.command("start") & filters.private)
 async def start_handler(client, message):
@@ -102,9 +57,9 @@ async def start_handler(client, message):
     ])
 
     await message.reply_text(
-        f"👋 Namaste {message.from_user.first_name}!\n\n"
-        "Diskwala link bhejo, direct streaming aur fast download link mil jayega.\n\n"
-        f"🔗 Referral Link: `{ref_link}`",
+        f"Namaste {message.from_user.first_name}!\n\n"
+        "Diskwala link bhejo, direct stream aur download button milega.\n\n"
+        f"Referral Link: `{ref_link}`",
         reply_markup=kb
     )
 
@@ -117,18 +72,18 @@ async def cb_handler(client, query):
         res = cursor.fetchone()
         now = int(time.time())
         is_active = (user_id == ADMIN_ID) or (res and res[0] > now)
-        status = "✅ VIP Active (Admin)" if user_id == ADMIN_ID else ("✅ VIP Active" if is_active else "❌ Inactive")
+        status = "VIP Active (Admin)" if user_id == ADMIN_ID else ("VIP Active" if is_active else "Inactive")
         
         await query.message.edit_text(
-            f"👤 User ID: `{user_id}`\n💎 VIP Status: {status}",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="back_home")]])
+            f"User ID: `{user_id}`\nVIP Status: {status}",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data="back_home")]])
         )
     elif query.data == "buy_premium":
         await query.message.edit_text(
-            "💎 **VIP Premium Plans:**\n\n• 1 Week = ₹29\n• 1 Month = ₹89\n\n⚡ Bina ads direct video access!",
+            "VIP Premium Plans:\n\n1 Week = Rs 29\n1 Month = Rs 89\n\nDirect link bina kisi ad ke!",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💬 Support Bot", url=SUPPORT_BOT_LINK)],
-                [InlineKeyboardButton("🔙 Back", callback_data="back_home")]
+                [InlineKeyboardButton("Support Bot", url=SUPPORT_BOT_LINK)],
+                [InlineKeyboardButton("Back", callback_data="back_home")]
             ])
         )
     elif query.data == "back_home":
@@ -139,30 +94,26 @@ async def cb_handler(client, query):
 async def handle_link(client, message):
     text = message.text.strip()
     if "diskwala" not in text.lower():
-        return await message.reply_text("⚠️ Kripya valid Diskwala video link bhejein.")
+        return await message.reply_text("Kripya valid Diskwala video link bhejein.")
 
-    status = await message.reply_text("⚡ Extracting Direct Video Link...")
+    clean_url = text.split("?")[0].rstrip("/")
+    file_id = clean_url.split("/")[-1]
 
-    direct_url, file_id = await resolve_diskwala(text)
-
-    # MX Player / VLC stream URL format
-    vlc_stream = f"vlc://{direct_url}" if direct_url.startswith("http") else direct_url
+    # Direct fallback URL
+    direct_link = f"https://www.diskwala.com/app/{file_id}"
 
     kb = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("▶️ Watch Direct (Browser)", url=direct_url),
-            InlineKeyboardButton("⬇️ Direct Download", url=direct_url)
+            InlineKeyboardButton("Play / Stream", url=direct_link),
+            InlineKeyboardButton("Download", url=direct_link)
         ],
         [
-            InlineKeyboardButton("💬 Support Bot", url=SUPPORT_BOT_LINK)
+            InlineKeyboardButton("Support Bot", url=SUPPORT_BOT_LINK)
         ]
     ])
 
-    await status.delete()
     await message.reply_text(
-        f"🎬 **Diskwala Video Extracted!**\n\n"
-        f"🆔 **File ID:** `{file_id}`\n\n"
-        "Direct link ready hai. Niche button par tap karke direct play karein ya download karein (bina Diskwala ad page ke):",
+        f"Diskwala Link Ready!\n\nFile ID: `{file_id}`\n\nNiche diye button par tap karein:",
         reply_markup=kb
     )
 
